@@ -2,6 +2,7 @@ import streamlit as st
 from google import genai
 from google.genai import types
 from PIL import Image
+import json
 
 st.set_page_config(
     page_title="OmniStudio Pro — AI Content Director",
@@ -9,20 +10,28 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom Styling Dashboard Modern
+# Inisialisasi Session State untuk Character Vault & Random Generator
+if "character_vault" not in st.session_state:
+    st.session_state.character_vault = {}
+
+if "auto_brief" not in st.session_state:
+    st.session_state.auto_brief = {
+        "title": "",
+        "notes": "",
+        "action": ""
+    }
+
+# Custom Styling
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
-    
     html, body, [class*="css"] {
         font-family: 'Plus Jakarta Sans', sans-serif;
     }
-    
     .stApp {
         background-color: #FAFAFA;
         color: #0F172A;
     }
-
     .header-box {
         background: #FFFFFF;
         border: 1px solid #E2E8F0;
@@ -31,7 +40,6 @@ st.markdown("""
         margin-bottom: 24px;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.04);
     }
-    
     .badge {
         display: inline-block;
         background: #EEF2FF;
@@ -42,22 +50,12 @@ st.markdown("""
         border-radius: 999px;
         margin-bottom: 8px;
     }
-
-    .section-card {
-        background: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        border-radius: 12px;
-        padding: 18px;
-        margin-bottom: 16px;
-    }
-
     .stButton > button {
         background: #0F172A !important;
         color: #FFFFFF !important;
         font-weight: 600 !important;
         border-radius: 10px !important;
-        padding: 12px 24px !important;
-        width: 100%;
+        padding: 10px 20px !important;
         border: none !important;
         transition: 0.2s;
     }
@@ -68,19 +66,45 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Sidebar Konfigurasi
+# Sidebar Konfigurasi & Character Vault
 with st.sidebar:
     st.markdown("### ⚙️ **Konfigurasi Studio**")
     api_key = st.text_input("Gemini API Key", type="password", help="Masukkan API Key dari Google AI Studio")
+    
     st.markdown("---")
-    st.markdown("**Standar Video:**\n- Rasio Vertikal: 9:16\n- Engine: Flow / OmniFlow 1.1 Flash\n- Dialog: Bahasa Indonesia Alami\n- Visual Prompt: Bahasa Inggris Deskriptif")
+    st.markdown("### 👤 **Character Vault**")
+    st.caption("Simpan karakter di sini agar tidak perlu upload ulang.")
+    
+    new_char_name = st.text_input("Nama Karakter Baru", placeholder="Misal: Rania / Sir Meow")
+    new_char_desc = st.text_area("Deskripsi Fisik Singkat", placeholder="Misal: Cewek 23th sawo matang ponytail / Kucing berarmor", height=60)
+    new_char_file = st.file_uploader("Upload Foto Karakter", type=["jpg", "jpeg", "png"], key="vault_uploader")
+    
+    if st.button("💾 Simpan Karakter ke Vault"):
+        if new_char_name and new_char_file:
+            st.session_state.character_vault[new_char_name] = {
+                "image": Image.open(new_char_file),
+                "desc": new_char_desc
+            }
+            st.success(f"Karakter '{new_char_name}' berhasil disimpan!")
+        else:
+            st.warning("Mohon isi nama dan unggah fotonya.")
+            
+    if st.session_state.character_vault:
+        st.write("---")
+        st.markdown("**Karakter Tersimpan:**")
+        for cname in list(st.session_state.character_vault.keys()):
+            col_k1, col_k2 = st.columns([3, 1])
+            col_k1.write(f"• {cname}")
+            if col_k2.button("Hapus", key=f"del_{cname}"):
+                del st.session_state.character_vault[cname]
+                st.rerun()
 
 # Header Platform
 st.markdown("""
 <div class="header-box">
     <span class="badge">PRO DIRECTOR SUITE</span>
     <h2 style="margin: 0; font-size: 1.8rem; font-weight: 700; color: #0F172A;">AI Video Production & Storyboard Director</h2>
-    <p style="margin: 6px 0 0 0; color: #64748B; font-size: 0.95rem;">Rancang alur lengkap, analisis aset fisik, script natural, dan prompt video siap eksekusi di OmniFlow.</p>
+    <p style="margin: 6px 0 0 0; color: #64748B; font-size: 0.95rem;">Simpan karakter tetap di vault, buat ide instan 1-klik, dan susun prompt OmniFlow tanpa ribet.</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -121,7 +145,7 @@ FORMAT OUTPUT WAJIB:
 col_left, col_right = st.columns([1.1, 1.3], gap="large")
 
 with col_left:
-    st.markdown("#### 🎯 **1. Mode & Format Video**")
+    st.markdown("#### 🎯 **1. Mode Konten & Opsi Otomatis**")
     mode = st.selectbox(
         "Pilih Format Konten",
         [
@@ -135,105 +159,145 @@ with col_left:
         ]
     )
 
-    st.markdown("#### 👤 **2. Karakter & Referensi Wajah**")
-    upload_char = st.file_uploader(
-        "Upload Foto Karakter Utama / Wajah Sendiri",
-        type=["jpg", "jpeg", "png"],
-        help="Upload foto wajah Anda atau karakter ChatGPT agar AI mengunci ciri fisiknya."
-    )
-    if upload_char:
-        st.image(upload_char, caption="Karakter Utama Terkunci", width=160)
-        
-    char_notes = st.text_input("Detail Ciri Karakter Utama", placeholder="Contoh: Rania, 23 tahun, kulit sawo matang, rambut ikal sebahu")
+    # Fitur Otomatisasi 1-Klik jika Pengguna Malas Mengetik
+    col_auto1, col_auto2 = st.columns([2, 1])
+    with col_auto1:
+        st.caption("Malas mikir atau ngetik? Klik tombol di sebelah kanan 👉")
+    with col_auto2:
+        if st.button("⚡ Buat Ide Otomatis"):
+            if not api_key:
+                st.error("Isi API Key di sidebar dulu.")
+            else:
+                client = genai.Client(api_key=api_key)
+                prompt_auto = f"""
+                Kamu adalah ideator konten viral. Buatkan SATU ide cerita/brief singkat untuk mode '{mode}'.
+                Balas HANYA dalam format JSON persis seperti ini:
+                {{
+                    "title": "Nama produk atau topik yang menarik",
+                    "notes": "Poin keunggulan / konflik utama yang kuat",
+                    "action": "Aksi visual kunci atau transisi kamera yang unik"
+                }}
+                """
+                try:
+                    res_auto = client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=prompt_auto,
+                        config=types.GenerateContentConfig(response_mime_type="application/json")
+                    )
+                    data = json.loads(res_auto.text)
+                    st.session_state.auto_brief["title"] = data.get("title", "")
+                    st.session_state.auto_brief["notes"] = data.get("notes", "")
+                    st.session_state.auto_brief["action"] = data.get("action", "")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Gagal generate otomatis: {e}")
 
-    # Karakter Tambahan khusus mode Podcast dan Drama
-    if mode in ["Podcast 2 Karakter (Host & Guest Interaktif)", "Drama Pendek Vertikal / C-Drama (High Tension & Plot Twist)"]:
-        upload_char_2 = st.file_uploader("Upload Foto Karakter Kedua (Lawan Main / Tamu)", type=["jpg", "jpeg", "png"])
-        if upload_char_2:
-            st.image(upload_char_2, caption="Karakter Kedua Terkunci", width=160)
-        char_notes_2 = st.text_input("Detail Ciri Karakter Kedua", placeholder="Contoh: Dion, 28 tahun, jas formal / kemeja santai")
+    st.markdown("#### 👤 **2. Pilih / Pasang Karakter**")
+    vault_keys = list(st.session_state.character_vault.keys())
+    selected_vault = st.selectbox("Pilih dari Vault Karakter (Opsional)", ["-- Upload Manual Baru --"] + vault_keys)
+
+    active_char_img = None
+    if selected_vault != "-- Upload Manual Baru --":
+        active_char_img = st.session_state.character_vault[selected_vault]["image"]
+        st.image(active_char_img, caption=f"Karakter Terpilih: {selected_vault}", width=150)
+        char_notes = st.text_input("Ciri Karakter", value=st.session_state.character_vault[selected_vault]["desc"])
     else:
-        upload_char_2 = None
-        char_notes_2 = ""
+        upload_char = st.file_uploader("Upload Foto Karakter Baru", type=["jpg", "jpeg", "png"])
+        if upload_char:
+            active_char_img = Image.open(upload_char)
+            st.image(active_char_img, caption="Karakter Baru Terkunci", width=150)
+        char_notes = st.text_input("Ciri Karakter Baru", placeholder="Contoh: Rania, 23th sawo matang ponytail")
 
-    # Bagian Produk atau Topik
+    # Bagian Detail Cerita / Produk
+    st.markdown("#### 💡 **3. Detail Konten / Produk**")
     if "Produk" in mode:
-        st.markdown("#### 📦 **3. Referensi & Manfaat Produk**")
-        upload_prod = st.file_uploader("Upload Foto Produk Fisik", type=["jpg", "jpeg", "png"])
+        upload_prod = st.file_uploader("Upload Foto Kemasan Produk (Opsional)", type=["jpg", "jpeg", "png"])
         if upload_prod:
-            st.image(upload_prod, caption="Kemasan Produk Terkunci", width=160)
-        prod_title = st.text_input("Nama Produk", placeholder="Contoh: Brightening Serum Glow 30ml")
-        prod_benefits = st.text_area("USP & Manfaat Produk", placeholder="Contoh: Tekstur ringan meresap cepat, memudarkan noda hitam dalam 14 hari", height=70)
+            st.image(upload_prod, caption="Kemasan Terkunci", width=150)
+        prod_title = st.text_input(
+            "Nama Produk",
+            value=st.session_state.auto_brief["title"],
+            placeholder="Contoh: Brightening Serum Glow 30ml"
+        )
+        prod_benefits = st.text_area(
+            "USP & Poin Keunggulan",
+            value=st.session_state.auto_brief["notes"],
+            placeholder="Contoh: Tekstur ringan meresap cepat, memudarkan noda hitam",
+            height=70
+        )
     else:
         upload_prod = None
-        st.markdown("#### 💡 **3. Alur Cerita & Topik Utama**")
-        prod_title = st.text_input("Premis Cerita / Topik Pembahasan", placeholder="Contoh: Pewaris kaya yang menyamar / Obrolan rahasia bisnis / Kucing ksatria")
-        prod_benefits = st.text_area("Poin Konflik / Pesan Utama", placeholder="Contoh: Dipermalukan di pesta lalu terbongkar status aslinya / Trik menabung realistis", height=70)
+        prod_title = st.text_input(
+            "Topik / Premis Cerita",
+            value=st.session_state.auto_brief["title"],
+            placeholder="Contoh: Pewaris kaya yang menyamar / Curhat ngonten"
+        )
+        prod_benefits = st.text_area(
+            "Konflik / Pesan Inti",
+            value=st.session_state.auto_brief["notes"],
+            placeholder="Contoh: Dipermalukan di pesta lalu status aslinya terbongkar",
+            height=70
+        )
 
-    st.markdown("#### 🎬 **4. Teknis Sutradara & Voice**")
+    st.markdown("#### 🎬 **4. Teknis & Suara**")
     col_c1, col_c2 = st.columns(2)
     with col_c1:
         voice_template = st.selectbox("Template Suara", [
-            "UGC Kasual Curhat (Santai, jeda napas terasa)",
+            "UGC Kasual Curhat (Santai, jeda napas alami)",
             "AI Influencer Trendy (Ceria, artikulasi renyah)",
-            "Podcast Dialog Alami (Santai, saling menimpali)",
+            "Podcast Dialog Alami (Santai, interaktif)",
             "Drama / Teaterikal (Tegang, tegas, berbisik dingin)",
             "Storyteller Reflektif (Tenang, bertempo sedang)",
             "Komedi / Sarkastik (Ekspresif, jeda punchline)"
         ])
-        clip_duration = st.selectbox("Durasi OmniFlow per Klip", ["4 detik", "6 detik", "8 detik", "10 detik"], index=2)
+        clip_duration = st.selectbox("Durasi OmniFlow", ["4 detik", "6 detik", "8 detik", "10 detik"], index=2)
     with col_c2:
-        cam_style = st.selectbox("Gaya Kamera & Lighting", [
+        cam_style = st.selectbox("Gaya Kamera", [
             "Smartphone Handheld 4K (Natural Daylight)",
             "Early-2000s Handheld Mini-DV (Grainy Low-Contrast)",
             "C-Drama Cinematic Contrast (Dramatic Low Angle & Moody)",
             "Studio Podcast Warm Ambient",
             "Muted Cool Dawn / Atmospheric Fog"
         ])
-        extra_flow = st.text_input("Aksi Kunci Khusus", placeholder="Contoh: Zoom mendadak ke tatapan mata / Jatuhkan ponsel ke lantai")
+        extra_flow = st.text_input(
+            "Aksi Kunci",
+            value=st.session_state.auto_brief["action"],
+            placeholder="Contoh: Kamera jatuh ke tanah / Zoom tatapan tajam"
+        )
 
     st.markdown("<br>", unsafe_allow_html=True)
     generate_btn = st.button("🚀 Rancang Paket Produksi Lengkap", type="primary")
 
 with col_right:
     st.markdown("#### 📋 **Storyboard & Prompt Siap Render**")
-    
     if generate_btn:
         if not api_key:
-            st.error("Masukkan Gemini API Key terlebih dahulu di sidebar sebelah kiri.")
+            st.error("Masukkan Gemini API Key terlebih dahulu di sidebar.")
         elif not prod_title:
-            st.warning("Mohon isi nama produk atau premis cerita utama.")
+            st.warning("Mohon isi nama produk atau premis cerita (atau klik 'Buat Ide Otomatis').")
         else:
             client = genai.Client(api_key=api_key)
-            
             prompt_text = f"""
             Buatkan paket produksi lengkap untuk:
             - Mode Produksi: {mode}
             - Nama Produk / Premis Utama: {prod_title}
-            - Manfaat / Poin Konflik: {prod_benefits}
-            - Ciri Karakter Utama: {char_notes}
-            - Ciri Karakter Kedua: {char_notes_2}
-            - Profil Template Suara: {voice_template}
-            - Gaya Kamera & Pencahayaan: {cam_style}
+            - Manfaat / Konflik: {prod_benefits}
+            - Ciri Karakter: {char_notes}
+            - Profil Suara: {voice_template}
+            - Gaya Kamera & Lighting: {cam_style}
             - Pilihan Durasi Render OmniFlow: {clip_duration}
-            - Aksi Kunci Tambahan: {extra_flow}
+            - Aksi Kunci: {extra_flow}
             """
             
             payload = [prompt_text]
-            
-            if upload_char:
-                payload.append(Image.open(upload_char))
-                prompt_text += "\n[Aset Karakter 1]: Kunci ciri wajah, proporsi, kulit, dan rambut dari gambar ini ke setiap prompt video."
-                
-            if upload_char_2:
-                payload.append(Image.open(upload_char_2))
-                prompt_text += "\n[Aset Karakter 2]: Kunci ciri fisik lawan main dari gambar ini ke prompt adegan terkait."
-                
+            if active_char_img:
+                payload.append(active_char_img)
+                prompt_text += "\n[Karakter]: Kunci ciri wajah, kulit, dan rambut dari gambar karakter terlampir ke setiap prompt video."
             if upload_prod:
                 payload.append(Image.open(upload_prod))
-                prompt_text += "\n[Aset Produk]: Kunci bentuk fisik botol/kemasan, label, dan warna tutup dari foto produk ini ke prompt adegan interaksi produk."
-                
-            with st.spinner("Sutradara sedang menyusun storyboard, dialog, dan prompt video..."):
+                prompt_text += "\n[Produk]: Kunci kemasan, warna tutup, dan label produk dari foto terlampir."
+
+            with st.spinner("Sutradara sedang menyusun naskah dan prompt OmniFlow..."):
                 try:
                     response = client.models.generate_content(
                         model="gemini-2.5-flash",
@@ -246,6 +310,6 @@ with col_right:
                     st.success("Paket produksi berhasil disusun!")
                     st.markdown(response.text)
                 except Exception as e:
-                    st.error(f"Terjadi kesalahan saat memproses API: {str(e)}")
+                    st.error(f"Terjadi kesalahan API: {str(e)}")
     else:
-        st.info("Pilih mode konten di panel kiri, isi data singkat, lalu klik tombol untuk menghasilkan naskah dan prompt OmniFlow.")
+        st.info("Pilih karakter dari vault atau klik '⚡ Buat Ide Otomatis' untuk merancang konten secara instan.")
