@@ -10,11 +10,11 @@ st.set_page_config(
     layout="wide"
 )
 
-# Prioritas model untuk auto-fallback
+# Prioritas model aktif (gemini-3.8-flash dipasang paling depan)
 CANDIDATE_MODELS = [
+    "gemini-3.8-flash",
     "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-2.5-flash"
+    "gemini-1.5-flash"
 ]
 
 def generate_with_fallback(client, contents, system_instruction=None, json_mode=False):
@@ -96,7 +96,7 @@ st.markdown("""
 with st.sidebar:
     st.markdown("### ⚙️ **Konfigurasi**")
     api_key = st.text_input("Gemini API Key", type="password")
-    st.caption("Engine: Auto-Fallback Multi-Model")
+    st.caption("Engine: Multi-Model Fallback (3.8 Flash)")
     
     st.markdown("---")
     st.markdown("### 👤 **Character Vault**")
