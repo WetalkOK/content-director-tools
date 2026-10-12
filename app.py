@@ -1,9 +1,9 @@
 import streamlit as st
 from google import genai
-from google.genai import types
 from PIL import Image
+import base64
+import io
 import json
-import time
 
 st.set_page_config(
     page_title="OmniStudio Compact Pro",
@@ -11,46 +11,19 @@ st.set_page_config(
     layout="wide"
 )
 
-# Urutan model resmi aktif yang kompatibel di Google GenAI SDK
-ACTIVE_MODEL_LIST = [
-    "gemini-2.5-flash",
-    "gemini-flash",
-    "gemini-2.5-pro"
-]
+# Model resmi sesuai dokumentasi Google AI Studio terbaru
+TARGET_MODEL = "gemini-3.8-flash"
 
-def call_gemini_safe(client, contents, system_instruction=None, json_mode=False):
-    """Mencoba generate dengan retry otomatis saat 503 dan fallback model."""
-    last_err = None
-    
-    for model_name in ACTIVE_MODEL_LIST:
-        for attempt in range(2):  # Coba hingga 2x per model jika server spike
-            try:
-                cfg_kwargs = {}
-                if system_instruction:
-                    cfg_kwargs["system_instruction"] = system_instruction
-                if json_mode:
-                    cfg_kwargs["response_mime_type"] = "application/json"
-                else:
-                    cfg_kwargs["temperature"] = 0.7
-
-                config = types.GenerateContentConfig(**cfg_kwargs)
-                res = client.models.generate_content(
-                    model=model_name,
-                    contents=contents,
-                    config=config
-                )
-                return res.text
-            except Exception as e:
-                err_str = str(e)
-                last_err = e
-                # Jika 503 (server sibuk), beri jeda sejenak lalu retry
-                if "503" in err_str or "UNAVAILABLE" in err_str:
-                    time.sleep(1.5)
-                    continue
-                # Jika 404/400, langsung coba model alternatif berikutnya
-                break
-                
-    raise last_err
+def image_to_base64_part(pil_image):
+    """Konversi PIL Image ke format data inline Base64 untuk Interactions API."""
+    buffered = io.BytesIO()
+    pil_image.save(buffered, format="JPEG")
+    b64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    return {
+        "type": "image",
+        "data": b64_str,
+        "mime_type": "image/jpeg"
+    }
 
 # Session State
 if "character_vault" not in st.session_state:
@@ -59,7 +32,7 @@ if "character_vault" not in st.session_state:
 if "auto_brief" not in st.session_state:
     st.session_state.auto_brief = {"title": "", "notes": "", "action": ""}
 
-# CSS Compact & Rapi
+# CSS Compact & Minimalist
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
@@ -107,7 +80,7 @@ st.markdown("""
 with st.sidebar:
     st.markdown("### ⚙️ **Konfigurasi**")
     api_key = st.text_input("Gemini API Key", type="password")
-    st.caption("Engine: Smart Retry & Auto-Fallback")
+    st.caption(f"Engine: Interactions API ({TARGET_MODEL})")
     
     st.markdown("---")
     st.markdown("### 👤 **Character Vault**")
@@ -147,8 +120,8 @@ st.markdown("""
 
 SYSTEM_DIRECTOR_INSTRUCTION = """
 Kamu adalah AI & UGC Content Director profesional untuk Reels, TikTok, Shorts.
-Engine: OmniFlow / Flow 1.1 Flash (4, 6, 8, atau 10 detik).
-Format: 9:16 vertikal, dialog Indonesia natural (12-18 kata per 8s), prompt visual bahasa Inggris deskriptif tanpa kata klise.
+Engine render pengguna: OmniFlow / Flow 1.1 Flash (durasi 4, 6, 8, atau 10 detik).
+Format: 9:16 vertikal, dialog Indonesia natural (12-18 kata per 8 detik), prompt visual bahasa Inggris deskriptif tanpa kata klise ('cinematic', 'hyper-realistic').
 
 Format Output:
 1. Konsep & Analisis Visual
@@ -186,10 +159,23 @@ with col_left:
                 st.error("Isi API Key di sidebar.")
             else:
                 client = genai.Client(api_key=api_key)
-                prompt_auto = f"Buat 1 ide menarik untuk format '{mode}'. Kembalikan JSON: title, notes, action."
+                prompt_auto = (
+                    f"Buat 1 ide menarik untuk format '{mode}'. "
+                    "Kembalikan HANYA teks JSON yang valid tanpa Markdown fence dengan key: title, notes, action."
+                )
                 try:
-                    res_text = call_gemini_safe(client, prompt_auto, json_mode=True)
-                    data = json.loads(res_text)
+                    interaction = client.interactions.create(
+                        model=TARGET_MODEL,
+                        input=prompt_auto
+                    )
+                    raw_text = interaction.output_text.strip()
+                    if raw_text.startswith("```json"):
+                        raw_text = raw_text[7:]
+                    if raw_text.startswith("```"):
+                        raw_text = raw_text[3:]
+                    if raw_text.endswith("```"):
+                        raw_text = raw_text[:-3]
+                    data = json.loads(raw_text.strip())
                     st.session_state.auto_brief["title"] = data.get("title", "")
                     st.session_state.auto_brief["notes"] = data.get("notes", "")
                     st.session_state.auto_brief["action"] = data.get("action", "")
@@ -200,7 +186,7 @@ with col_left:
     tab_aset, tab_detail, tab_kamera = st.tabs(["👤 Karakter & Produk", "📝 Cerita & Naskah", "🎬 Kamera & Suara"])
 
     active_char_img = None
-    upload_prod = None
+    upload_prod_img = None
 
     with tab_aset:
         v_keys = list(st.session_state.character_vault.keys())
@@ -223,8 +209,8 @@ with col_left:
             if "Produk" in mode:
                 up_p = st.file_uploader("Foto Produk", type=["jpg", "png"], key="single_up_p")
                 if up_p:
-                    upload_prod = up_p
-                    st.image(Image.open(up_p), width=90)
+                    upload_prod_img = Image.open(up_p)
+                    st.image(upload_prod_img, width=90)
             else:
                 st.caption("Mode ini tidak memerlukan foto kemasan produk.")
 
@@ -276,6 +262,8 @@ with col_right:
         else:
             client = genai.Client(api_key=api_key)
             prompt_text = f"""
+            {SYSTEM_DIRECTOR_INSTRUCTION}
+
             Buatkan paket produksi lengkap untuk:
             - Mode: {mode}
             - Nama Produk/Topik: {prod_title}
@@ -286,24 +274,27 @@ with col_right:
             - Durasi OmniFlow: {clip_dur}
             - Aksi Kunci: {extra_flow}
             """
-            payload = [prompt_text]
+            
+            # Susun payload input berbasis multimodal Interactions API
+            input_payload = [{"type": "text", "text": prompt_text}]
+            
             if active_char_img:
-                payload.append(active_char_img)
+                input_payload.append(image_to_base64_part(active_char_img))
                 prompt_text += "\n[Karakter]: Kunci detail visual wajah dan tubuh karakter dari gambar terlampir."
-            if upload_prod:
-                payload.append(Image.open(upload_prod))
+                
+            if upload_prod_img:
+                input_payload.append(image_to_base64_part(upload_prod_img))
                 prompt_text += "\n[Produk]: Kunci kemasan produk fisik dari gambar terlampir."
 
             with st.spinner("Sutradara sedang menyusun paket naskah dan prompt..."):
                 try:
-                    result_text = call_gemini_safe(
-                        client=client,
-                        contents=payload,
-                        system_instruction=SYSTEM_DIRECTOR_INSTRUCTION
+                    interaction = client.interactions.create(
+                        model=TARGET_MODEL,
+                        input=input_payload
                     )
                     st.success("Paket produksi selesai!")
-                    st.markdown(result_text)
+                    st.markdown(interaction.output_text)
                 except Exception as e:
-                    st.error(f"Terjadi kesalahan: {str(e)}")
+                    st.error(f"Terjadi kesalahan API: {str(e)}")
     else:
         st.info("Pilih mode, siapkan data singkat atau klik '⚡ Ide Otomatis', lalu klik tombol untuk memproses.")
