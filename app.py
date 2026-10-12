@@ -10,8 +10,8 @@ st.set_page_config(
     layout="wide"
 )
 
-# Model stabil resmi yang aktif di Google AI Studio
-TARGET_MODEL = "gemini-2.0-flash"
+# Model resmi yang diminta oleh endpoint API Anda
+TARGET_MODEL = "gemini-3.8-flash"
 
 # Session State
 if "character_vault" not in st.session_state:
