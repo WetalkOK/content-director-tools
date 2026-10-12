@@ -3,6 +3,7 @@ from google import genai
 from google.genai import types
 from PIL import Image
 import json
+import time
 
 st.set_page_config(
     page_title="OmniStudio Compact Pro",
@@ -10,8 +11,46 @@ st.set_page_config(
     layout="wide"
 )
 
-# Model resmi yang diminta oleh endpoint API Anda
-TARGET_MODEL = "gemini-3.8-flash"
+# Urutan model resmi aktif yang kompatibel di Google GenAI SDK
+ACTIVE_MODEL_LIST = [
+    "gemini-2.5-flash",
+    "gemini-flash",
+    "gemini-2.5-pro"
+]
+
+def call_gemini_safe(client, contents, system_instruction=None, json_mode=False):
+    """Mencoba generate dengan retry otomatis saat 503 dan fallback model."""
+    last_err = None
+    
+    for model_name in ACTIVE_MODEL_LIST:
+        for attempt in range(2):  # Coba hingga 2x per model jika server spike
+            try:
+                cfg_kwargs = {}
+                if system_instruction:
+                    cfg_kwargs["system_instruction"] = system_instruction
+                if json_mode:
+                    cfg_kwargs["response_mime_type"] = "application/json"
+                else:
+                    cfg_kwargs["temperature"] = 0.7
+
+                config = types.GenerateContentConfig(**cfg_kwargs)
+                res = client.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config=config
+                )
+                return res.text
+            except Exception as e:
+                err_str = str(e)
+                last_err = e
+                # Jika 503 (server sibuk), beri jeda sejenak lalu retry
+                if "503" in err_str or "UNAVAILABLE" in err_str:
+                    time.sleep(1.5)
+                    continue
+                # Jika 404/400, langsung coba model alternatif berikutnya
+                break
+                
+    raise last_err
 
 # Session State
 if "character_vault" not in st.session_state:
@@ -20,7 +59,7 @@ if "character_vault" not in st.session_state:
 if "auto_brief" not in st.session_state:
     st.session_state.auto_brief = {"title": "", "notes": "", "action": ""}
 
-# CSS Compact
+# CSS Compact & Rapi
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
@@ -68,7 +107,7 @@ st.markdown("""
 with st.sidebar:
     st.markdown("### ⚙️ **Konfigurasi**")
     api_key = st.text_input("Gemini API Key", type="password")
-    st.caption(f"Engine: `{TARGET_MODEL}`")
+    st.caption("Engine: Smart Retry & Auto-Fallback")
     
     st.markdown("---")
     st.markdown("### 👤 **Character Vault**")
@@ -147,20 +186,16 @@ with col_left:
                 st.error("Isi API Key di sidebar.")
             else:
                 client = genai.Client(api_key=api_key)
-                prompt_auto = f"Buat 1 ide menarik untuk mode '{mode}'. Kembalikan JSON dengan key persis: title, notes, action."
+                prompt_auto = f"Buat 1 ide menarik untuk format '{mode}'. Kembalikan JSON: title, notes, action."
                 try:
-                    response = client.models.generate_content(
-                        model=TARGET_MODEL,
-                        contents=prompt_auto,
-                        config=types.GenerateContentConfig(response_mime_type="application/json")
-                    )
-                    data = json.loads(response.text)
+                    res_text = call_gemini_safe(client, prompt_auto, json_mode=True)
+                    data = json.loads(res_text)
                     st.session_state.auto_brief["title"] = data.get("title", "")
                     st.session_state.auto_brief["notes"] = data.get("notes", "")
                     st.session_state.auto_brief["action"] = data.get("action", "")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Gagal generate: {e}")
+                    st.error(f"Gagal generate otomatis: {e}")
 
     tab_aset, tab_detail, tab_kamera = st.tabs(["👤 Karakter & Produk", "📝 Cerita & Naskah", "🎬 Kamera & Suara"])
 
@@ -261,17 +296,14 @@ with col_right:
 
             with st.spinner("Sutradara sedang menyusun paket naskah dan prompt..."):
                 try:
-                    response = client.models.generate_content(
-                        model=TARGET_MODEL,
+                    result_text = call_gemini_safe(
+                        client=client,
                         contents=payload,
-                        config=types.GenerateContentConfig(
-                            system_instruction=SYSTEM_DIRECTOR_INSTRUCTION,
-                            temperature=0.7
-                        )
+                        system_instruction=SYSTEM_DIRECTOR_INSTRUCTION
                     )
                     st.success("Paket produksi selesai!")
-                    st.markdown(response.text)
+                    st.markdown(result_text)
                 except Exception as e:
-                    st.error(f"Terjadi kesalahan API: {str(e)}")
+                    st.error(f"Terjadi kesalahan: {str(e)}")
     else:
         st.info("Pilih mode, siapkan data singkat atau klik '⚡ Ide Otomatis', lalu klik tombol untuk memproses.")
