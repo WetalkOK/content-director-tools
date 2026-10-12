@@ -16,7 +16,7 @@ api_key = st.sidebar.text_input("Gemini API Key", type="password", help="Dapatka
 SYSTEM_DIRECTOR_INSTRUCTION = """
 Kamu adalah UGC & AI Content Director profesional untuk Instagram Reels, TikTok, dan Shorts.
 Pengguna memakai alur produksi nyata:
-- Gambar referensi/karakter dibuat di ChatGPT / diunggah dari foto nyata.
+- Gambar referensi/karakter dibuat di ChatGPT atau diunggah dari foto nyata.
 - Video dirender menggunakan OmniFlow / Flow (Omni 1.1 Flash) dengan pilihan durasi per klip: 4, 6, 8, atau 10 detik.
 - Format default: Vertikal 9:16, naskah percakapan bahasa Indonesia natural (patokan klip 8 detik: 12-18 kata), dan prompt visual deskriptif bahasa Inggris tanpa istilah klise ('cinematic', 'hyper-realistic', 'photorealistic').
 
@@ -78,7 +78,6 @@ with col_left:
         placeholder="Contoh: Rania (23 th, Sawo Matang) / Sir Meow Kucing Ksatria"
     )
 
-    # Bagian Produk (Hanya tampil jika mode butuh produk, atau opsional)
     st.subheader("2. Detail Produk (Khusus UGC / Jual Produk)")
     if "Produk" in mode:
         upload_prod = st.file_uploader(
@@ -90,10 +89,17 @@ with col_left:
             st.image(upload_prod, caption="Produk Terkunci", width=180)
             
         prod_title = st.text_input("Nama Produk", placeholder="Contoh: Brightening Serum Glow 30ml")
-        prod_benefits = st.text_area("Manfaat Utama / Keunggulan (USP)", placeholder="Contoh: Tekstur cair cepat meresap, pudarkan bekas jerawat, wangi segar", height=70)
+        prod_benefits = st.text_area(
+            "Manfaat Utama / Keunggulan (USP)",
+            placeholder="Contoh: Tekstur cair cepat meresap, pudarkan bekas jerawat, wangi segar",
+            height=70
+        )
     else:
         upload_prod = None
-        prod_title = st.text_input("Topik / Ide Cerita Utama", placeholder="Contoh: Curhat susahnya bikin konten / Obrolan rahasia bisnis / Kucing ketemu naga")
+        prod_title = st.text_input(
+            "Topik / Ide Cerita Utama",
+            placeholder="Contoh: Curhat susahnya bikin konten / Obrolan rahasia bisnis / Kucing ketemu naga"
+        )
         prod_benefits = ""
 
     st.subheader("3. Suara, Kamera & Durasi")
@@ -170,3 +176,8 @@ with col_right:
                         config=types.GenerateContentConfig(
                             system_instruction=SYSTEM_DIRECTOR_INSTRUCTION,
                             temperature=0.7
+                        )
+                    )
+                    st.markdown(response.text)
+                except Exception as e:
+                    st.error(f"Terjadi kesalahan saat memproses API: {str(e)}")
