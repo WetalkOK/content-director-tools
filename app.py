@@ -10,36 +10,8 @@ st.set_page_config(
     layout="wide"
 )
 
-# Prioritas model aktif (gemini-3.8-flash dipasang paling depan)
-CANDIDATE_MODELS = [
-    "gemini-3.8-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash"
-]
-
-def generate_with_fallback(client, contents, system_instruction=None, json_mode=False):
-    last_error = None
-    for model_name in CANDIDATE_MODELS:
-        try:
-            cfg_params = {}
-            if system_instruction:
-                cfg_params["system_instruction"] = system_instruction
-            if json_mode:
-                cfg_params["response_mime_type"] = "application/json"
-            else:
-                cfg_params["temperature"] = 0.7
-
-            config = types.GenerateContentConfig(**cfg_params)
-            response = client.models.generate_content(
-                model=model_name,
-                contents=contents,
-                config=config
-            )
-            return response.text
-        except Exception as e:
-            last_error = e
-            continue
-    raise last_error
+# Model stabil resmi yang aktif di Google AI Studio
+TARGET_MODEL = "gemini-2.0-flash"
 
 # Session State
 if "character_vault" not in st.session_state:
@@ -96,7 +68,7 @@ st.markdown("""
 with st.sidebar:
     st.markdown("### ⚙️ **Konfigurasi**")
     api_key = st.text_input("Gemini API Key", type="password")
-    st.caption("Engine: Multi-Model Fallback (3.8 Flash)")
+    st.caption(f"Engine: `{TARGET_MODEL}`")
     
     st.markdown("---")
     st.markdown("### 👤 **Character Vault**")
@@ -175,10 +147,14 @@ with col_left:
                 st.error("Isi API Key di sidebar.")
             else:
                 client = genai.Client(api_key=api_key)
-                prompt_auto = f"Buat 1 ide menarik untuk mode '{mode}'. Kembalikan JSON: title, notes, action."
+                prompt_auto = f"Buat 1 ide menarik untuk mode '{mode}'. Kembalikan JSON dengan key persis: title, notes, action."
                 try:
-                    res_text = generate_with_fallback(client, prompt_auto, json_mode=True)
-                    data = json.loads(res_text)
+                    response = client.models.generate_content(
+                        model=TARGET_MODEL,
+                        contents=prompt_auto,
+                        config=types.GenerateContentConfig(response_mime_type="application/json")
+                    )
+                    data = json.loads(response.text)
                     st.session_state.auto_brief["title"] = data.get("title", "")
                     st.session_state.auto_brief["notes"] = data.get("notes", "")
                     st.session_state.auto_brief["action"] = data.get("action", "")
@@ -285,13 +261,16 @@ with col_right:
 
             with st.spinner("Sutradara sedang menyusun paket naskah dan prompt..."):
                 try:
-                    result_text = generate_with_fallback(
-                        client=client,
+                    response = client.models.generate_content(
+                        model=TARGET_MODEL,
                         contents=payload,
-                        system_instruction=SYSTEM_DIRECTOR_INSTRUCTION
+                        config=types.GenerateContentConfig(
+                            system_instruction=SYSTEM_DIRECTOR_INSTRUCTION,
+                            temperature=0.7
+                        )
                     )
                     st.success("Paket produksi selesai!")
-                    st.markdown(result_text)
+                    st.markdown(response.text)
                 except Exception as e:
                     st.error(f"Terjadi kesalahan API: {str(e)}")
     else:
