@@ -77,9 +77,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Sidebar
+# Sidebar
 with st.sidebar:
     st.markdown("### ⚙️ **Konfigurasi**")
-    api_key = st.text_input("Gemini API Key", type="password")
+    # Cek apakah tersimpan di Streamlit Secrets, jika tidak ambil dari input manual
+    default_key = st.secrets.get("GEMINI_API_KEY", "") if hasattr(st, "secrets") else ""
+    api_key = st.text_input("Gemini API Key", value=default_key, type="password")
     st.caption(f"Engine: Interactions API ({TARGET_MODEL})")
     
     st.markdown("---")
